@@ -32,6 +32,6 @@ dependencies:
   - flake8-print
   - flake8-quotes
   - pep8-naming
-  - pyproj
+  - pyproj<3.0
   - cartopy
   - dask
