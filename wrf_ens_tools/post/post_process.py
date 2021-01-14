@@ -17,6 +17,7 @@ from sklearn.neighbors import BallTree
 import dask.array as da
 import xarray as xr
 import metpy.constants as constants
+from metpy.calc import temperature_from_potential_temperature, virtual_temperature
 import wrf
 from netCDF4 import Dataset
 from datetime import timedelta, datetime
@@ -1233,10 +1234,14 @@ def open_wrf_dataset(inname, nest='static', chunks=None):
     for attr in indata.attrs:
         if attr == 'START_DATE':
             ds.attrs['nest_start_date'] = datetime.strptime(indata.START_DATE,
-                                                            '%Y-%m-%d_%H:%M:%S').strftime('%Y-%m-%dT%H:%M:%S')
+                                                            '%Y-%m-%d_%H:%M:%S'
+                                                            ).strftime(
+                                                            '%Y-%m-%dT%H:%M:%S')
         elif attr == 'SIMULATION_START_DATE':
             ds.attrs['simulation_start_date'] = datetime.strptime(indata.SIMULATION_START_DATE,
-                                                                  '%Y-%m-%d_%H:%M:%S').strftime('%Y-%m-%dT%H:%M:%S')
+                                                                  '%Y-%m-%d_%H:%M:%S'
+                                                                  ).strftime(
+                                                                  '%Y-%m-%dT%H:%M:%S')
         elif attr == 'MOAD_CEN_LAT':
             ds.attrs['central_latitude'] = indata.MOAD_CEN_LAT
         elif attr == 'CEN_LON':
@@ -1528,7 +1533,8 @@ def open_wrf_dataset(inname, nest='static', chunks=None):
         ds.v_wind.attrs['units'] = indata.V.units
 
     # earth-relative
-    u_rot, v_rot = earth_relative_winds(u, v, sinalpha[:, np.newaxis, ], cosalpha[:, np.newaxis, ])
+    u_rot, v_rot = earth_relative_winds(u, v, sinalpha[:, np.newaxis, ],
+                                        cosalpha[:, np.newaxis, ])
 
     ds['u_wind_earth_relative'] = (('time', 'z', 'y', 'x'), u_rot)
     ds.u_wind_earth_relative.attrs['description'] = 'U-component of wind (earth-relative)'
@@ -1575,8 +1581,10 @@ def open_wrf_dataset(inname, nest='static', chunks=None):
     except AttributeError:
         pass
 
-    refl = simulated_reflectivity(ds['pressure'].data, ds.temperature.data, ds['vapor_mixing_ratio'].data,
-                                  ds['rain_mixing_ratio'].data, snow_mixing_ratio=qsnow,
+    refl = simulated_reflectivity(ds['pressure'].data, ds.temperature.data,
+                                  ds['vapor_mixing_ratio'].data,
+                                  ds['rain_mixing_ratio'].data,
+                                  snow_mixing_ratio=qsnow,
                                   graupel_mixing_ratio=qgraupel)
     ds['simulated_reflectivity'] = (('time', 'z', 'y', 'x'), refl)
     ds.simulated_reflectivity.attrs['units'] = 'dBZ'
@@ -1643,8 +1651,10 @@ def lcc_projection(indata, r=6370000):
     :return: x, y: x and y coordinate arrays
     """
     wrf_proj = pyproj.Proj(proj='lcc',  # projection type: Lambert Conformal Conic
-                           lat_1=indata.TRUELAT1, lat_2=indata.TRUELAT2,  # Cone intersects with the sphere
-                           lat_0=indata.MOAD_CEN_LAT, lon_0=indata.STAND_LON,  # Center point
+                           # Cone intersects with the sphere
+                           lat_1=indata.TRUELAT1, lat_2=indata.TRUELAT2,
+                           # Center point
+                           lat_0=indata.MOAD_CEN_LAT, lon_0=indata.STAND_LON,
                            a=r, b=r)  # This is it! The Earth is a perfect sphere
     wgs_proj = pyproj.Proj(proj='latlong', datum='WGS84')
     e, n = pyproj.transform(wgs_proj, wrf_proj, indata.CEN_LON, indata.CEN_LAT)
@@ -1660,8 +1670,9 @@ def lcc_projection(indata, r=6370000):
     return x, y
 
 
-def simulated_reflectivity(pressure, temperature, vapor_mixing_ratio, liquid_mixing_ratio, snow_mixing_ratio=None,
-                           graupel_mixing_ratio=None, use_varint=False, use_liqskin=False):
+def simulated_reflectivity(pressure, temperature, vapor_mixing_ratio, liquid_mixing_ratio,
+                           snow_mixing_ratio=None, graupel_mixing_ratio=None,
+                           use_varint=False, use_liqskin=False):
     """
     Calculate the simulated reflectivity factor from model output.
     Ported from RIP fortran calculation used in the WRF-Python package.
@@ -1714,16 +1725,17 @@ def simulated_reflectivity(pressure, temperature, vapor_mixing_ratio, liquid_mix
     Contact Mark Stoelinga (stoeling@atmos.washington.edu) for a copy.
     """
     # Set values for constants with variable intercept
-    R1 = 1e-15
-    RON = 8e6
-    RON2 = 1e10
-    SON = 2e7
-    GON = 5e7
-    RON_MIN = 8e6
-    RON_QR0 = 0.00010
-    RON_DELQR0 = 0.25*RON_QR0
-    RON_CONST1R = (RON2-RON_MIN)*0.5
-    RON_CONST2R = (RON2+RON_MIN)*0.5
+    # This has net yet been implemented as it is not used in the WRF-Python implementation
+    # R1 = 1e-15
+    # RON = 8e6
+    # RON2 = 1e10
+    # SON = 2e7
+    # GON = 5e7
+    # RON_MIN = 8e6
+    # RON_QR0 = 0.00010
+    # RON_DELQR0 = 0.25*RON_QR0
+    # RON_CONST1R = (RON2-RON_MIN)*0.5
+    # RON_CONST2R = (RON2+RON_MIN)*0.5
 
     # set constant intercepts
     rno_l = 8e6
@@ -1817,86 +1829,3 @@ def simulated_reflectivity(pressure, temperature, vapor_mixing_ratio, liquid_mix
     # Convert to dBZ
     dbz = 10.*da.log10(z_e)
     return dbz
-
-
-def virtual_temperature(temperature, mixing, molecular_weight_ratio=0.622):
-    r"""Calculate virtual temperature.
-
-    This calculation must be given an air parcel's temperature and mixing ratio.
-    The implementation uses the formula outlined in [Hobbs2006]_ pg.80. Taken from metpy.calc
-    and modified for Dask support.
-
-    Parameters
-    ----------
-    temperature:
-        air temperature
-    mixing :
-        dimensionless mass mixing ratio
-    molecular_weight_ratio : float, optional
-        The ratio of the molecular weight of the constituent gas to that assumed
-        for air. Defaults to the ratio for water vapor to dry air.
-        (:math:`\epsilon\approx0.622`).
-
-    Returns
-    -------
-        The corresponding virtual temperature of the parcel
-
-    Notes
-    -----
-    .. math:: T_v = T \frac{\text{w} + \epsilon}{\epsilon\,(1 + \text{w})}
-
-    """
-    return temperature * ((mixing + molecular_weight_ratio)
-                          / (molecular_weight_ratio * (1 + mixing)))
-
-
-def exner_function(pressure, reference_pressure=P0):
-    r"""Calculate the Exner function. From metpy.calc.
-    .. math:: \Pi = \left( \frac{p}{p_0} \right)^\kappa
-    This can be used to calculate potential temperature from temperature (and visa-versa),
-    since
-    .. math:: \Pi = \frac{T}{\theta}
-    Parameters
-    ----------
-    pressure :
-        total atmospheric pressure, units should match reference pressure (default is Pa)
-    reference_pressure :
-        The reference pressure against which to calculate the Exner function, defaults to
-        metpy.constants.P0
-    Returns
-    -------
-        The value of the Exner function at the given pressure
-    See Also
-    --------
-    potential_temperature
-    temperature_from_potential_temperature
-    """
-    return (pressure / reference_pressure)**kappa
-
-
-def temperature_from_potential_temperature(pressure, potential_temperature, reference_pressure=P0):
-    r"""Calculate the temperature from a given potential temperature.
-    Uses the inverse of the Poisson equation to calculate the temperature from a
-    given potential temperature at a specific pressure level. Taken from metpy.calc and modified for Dask.
-    Parameters
-    ----------
-    pressure :
-        total atmospheric pressure, units should match reference pressure (default is Pa).
-    potential_temperature :
-        potential temperature
-    reference_pressure :
-        The reference pressure against which to calculate the Exner function, defaults to
-        metpy.constants.P0
-    Returns
-    -------
-        The temperature corresponding to the potential temperature and pressure.
-    See Also
-    --------
-    dry_lapse
-    potential_temperature
-    Notes
-    -----
-    Formula:
-    .. math:: T = \Theta (P / P_0)^\kappa
-    """
-    return potential_temperature * exner_function(pressure, reference_pressure=reference_pressure)
