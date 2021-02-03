@@ -18,6 +18,7 @@ import dask.array as da
 import xarray as xr
 import metpy.constants as constants
 from metpy.calc import temperature_from_potential_temperature, virtual_temperature
+from metpy.units import units
 import wrf
 from netCDF4 import Dataset
 from datetime import timedelta, datetime
@@ -1221,11 +1222,11 @@ def open_wrf_dataset(inname, nest='static', chunks=None):
     # Set up output dataset with desired dimensions
     coords = {}
     if nest == 'moving':
-        coords['latitude'] = (('time', 'y', 'x'), indata.XLAT.data)
-        coords['longitude'] = (('time', 'y', 'x'), indata.XLONG.data)
+        coords['latitude'] = (('time', 'y', 'x'), indata.XLAT.data * units('degrees'))
+        coords['longitude'] = (('time', 'y', 'x'), indata.XLONG.data * units('degrees'))
     else:
-        coords['latitude'] = (('y', 'x'), indata.XLAT[0].data)
-        coords['longitude'] = (('y', 'x'), indata.XLONG[0].data)
+        coords['latitude'] = (('y', 'x'), indata.XLAT[0].data * units('degrees'))
+        coords['longitude'] = (('y', 'x'), indata.XLONG[0].data * units('degrees'))
     coords['z'] = (('z'), indata.bottom_top.data)
     coords['time'] = indata.XTIME.data
     ds = xr.Dataset(coords=coords)
@@ -1278,7 +1279,7 @@ def open_wrf_dataset(inname, nest='static', chunks=None):
     # Calculate the model projection x and y coordinates
     # TODO: Add support for more projections
     if indata.MAP_PROJ_CHAR == 'Lambert Conformal':
-        r = 6370000
+        r = 6370000 * units.meter
         x_model, y_model = lcc_projection(indata, r=r)
         ds['x'] = x_model
         ds.x.attrs['description'] = 'Projection x coordinate'
@@ -1294,219 +1295,245 @@ def open_wrf_dataset(inname, nest='static', chunks=None):
         raise NotImplementedError('Input projection {} not supported'.format(indata.MAP_PROJ_CHAR))
 
     # combine and write precipitation variables
-    ds['total_precipitation'] = (('time', 'y', 'x'), (indata.RAINC + indata.RAINNC).data)
-    ds.total_precipitation.attrs['description'] = 'Total Accumulated Precipitation'
+    pcp = (indata.RAINC.data + indata.RAINNC.data)
     if indata.RAINC.units == 'mm':
+        ds['total_precipitation'] = (('time', 'y', 'x'), pcp * units('mm'))
         ds.total_precipitation.attrs['units'] = 'millimeter'
     else:
+        ds['total_precipitation'] = (('time', 'y', 'x'), pcp)
         warnings.warn('Unknown precipitation unit {} encountered'.format(indata.RAINC.units))
         ds.total_precipitation.attrs['units'] = indata.RAINC.units
+    ds.total_precipitation.attrs['description'] = 'Total Accumulated Precipitation'
 
     # get surface variables
     # 2-m temperature
-    ds['temperature_2m'] = (('time', 'y', 'x'), indata.T2.data)
-    ds.temperature_2m.attrs['description'] = 'Temperature at 2 meters'
     if indata.T2.units == 'K':
+        ds['temperature_2m'] = (('time', 'y', 'x'), indata.T2.data * units('kelvin'))
         ds.temperature_2m.attrs['units'] = 'kelvin'
     else:
         warnings.warn('Unknown temperature unit {} encountered'.format(indata.T2.units))
         ds.temperature_2m.attrs['units'] = indata.T2.units
+    ds.temperature_2m.attrs['description'] = 'Temperature at 2 meters'
 
     # 2-m potential temperature
-    ds['potential_temperature_2m'] = (('time', 'y', 'x'), indata.TH2.data)
-    ds.potential_temperature_2m.attrs['description'] = 'Potential temperature at 2 meters'
     if indata.TH2.units == 'K':
+        ds['potential_temperature_2m'] = (('time', 'y', 'x'),
+                                          indata.TH2.data * units('kelvin'))
         ds.potential_temperature_2m.attrs['units'] = 'kelvin'
     else:
         warnings.warn('Unknown temperature unit {} encountered'.format(indata.TH2.units))
+        ds['potential_temperature_2m'] = (('time', 'y', 'x'), indata.TH2.data)
         ds.potential_temperature_2m.attrs['units'] = indata.TH2.units
+    ds.potential_temperature_2m.attrs['description'] = 'Potential temperature at 2 meters'
 
     # 2-m mixing ratio
-    ds['mixing_ratio_2m'] = (('time', 'y', 'x'), indata.Q2.data)
-    ds.mixing_ratio_2m.attrs['description'] = 'Mixing ratio at 2 meters'
     if indata.Q2.units == 'kg kg-1':
+        ds['mixing_ratio_2m'] = (('time', 'y', 'x'), indata.Q2.data * units.dimensionless)
         ds.mixing_ratio_2m.attrs['units'] = 'dimensionless'
     else:
         warnings.warn('Unknown moisture unit {} encountered'.format(indata.Q2.units))
+        ds['mixing_ratio_2m'] = (('time', 'y', 'x'), indata.Q2.data)
         ds.mixing_ratio_2m.attrs['units'] = indata.Q2.units
+    ds.mixing_ratio_2m.attrs['description'] = 'Mixing ratio at 2 meters'
 
     # 10-m winds on model grid
     u10 = indata.U10.data
     v10 = indata.V10.data
-    ds['u_10m'] = (('time', 'y', 'x'), u10)
-    ds.u_10m.attrs['description'] = 'U-component of wind at 10 meters (model-relative)'
     if indata.U10.units == 'm s-1':
+        ds['u_10m'] = (('time', 'y', 'x'), u10 * units('m/s'))
         ds.u_10m.attrs['units'] = 'meter/second'
     else:
         warnings.warn('Unknown velocity units {} encountered'.format(indata.U10.units))
+        ds['u_10m'] = (('time', 'y', 'x'), u10)
         ds.u_10m.attrs['units'] = indata.U10.units
+    ds.u_10m.attrs['description'] = 'U-component of wind at 10 meters (model-relative)'
 
-    ds['v_10m'] = (('time', 'y', 'x'), v10)
-    ds.v_10m.attrs['description'] = 'V-component of wind at 10 meters (model-relative)'
     if indata.V10.units == 'm s-1':
+        ds['v_10m'] = (('time', 'y', 'x'), v10 * units('m/s'))
         ds.v_10m.attrs['units'] = 'meter/second'
     else:
+        ds['v_10m'] = (('time', 'y', 'x'), v10)
         warnings.warn('Unknown velocity units {} encountered'.format(indata.V10.units))
         ds.v_10m.attrs['units'] = indata.V10.units
+    ds.v_10m.attrs['description'] = 'V-component of wind at 10 meters (model-relative)'
 
     # 10-m winds earth relative
     sinalpha = indata.SINALPHA.data
     cosalpha = indata.COSALPHA.data
     u10_rot, v10_rot = earth_relative_winds(u10, v10, sinalpha, cosalpha)
-    ds['u_10m_earth_relative'] = (('time', 'y', 'x'), u10_rot)
-    ds.u_10m_earth_relative.attrs['description'] = 'U-component of wind at 10 meters (earth-relative)'
     if indata.U10.units == 'm s-1':
+        ds['u_10m_earth_relative'] = (('time', 'y', 'x'), u10_rot * units('m/s'))
         ds.u_10m_earth_relative.attrs['units'] = 'meter/second'
     else:
         warnings.warn('Unknown velocity units {} encountered'.format(indata.U10.units))
+        ds['u_10m_earth_relative'] = (('time', 'y', 'x'), u10_rot)
         ds.u_10m_earth_relative.attrs['units'] = indata.U10.units
+    ds.u_10m_earth_relative.attrs['description'] = 'U-component of wind at 10 meters (earth-relative)'
 
-    ds['v_10m_earth_relative'] = (('time', 'y', 'x'), v10_rot)
-    ds.v_10m_earth_relative.attrs['description'] = 'V-component of wind at 10 meters (earth-relative)'
     if indata.V10.units == 'm s-1':
+        ds['v_10m_earth_relative'] = (('time', 'y', 'x'), v10_rot * units('m/s'))
         ds.v_10m_earth_relative.attrs['units'] = 'meter/second'
     else:
         warnings.warn('Unknown velocity units {} encountered'.format(indata.V10.units))
+        ds['v_10m_earth_relative'] = (('time', 'y', 'x'), v10_rot)
         ds.v_10m_earth_relative.attrs['units'] = indata.V10.units
+    ds.v_10m_earth_relative.attrs['description'] = 'V-component of wind at 10 meters (earth-relative)'
 
     # Surface pressure
-    ds['surface_pressure'] = (('time', 'y', 'x'), indata.PSFC.data)
-    ds.surface_pressure.attrs['description'] = 'Pressure at surface (not reduced)'
     if indata.PSFC.units == 'Pa':
+        ds['surface_pressure'] = (('time', 'y', 'x'), indata.PSFC.data * units.pascal)
         ds.surface_pressure.attrs['units'] = 'pascal'
     else:
         warnings.warn('Unknown pressure unit {} encountered'.format(indata.PSFC.units))
+        ds['surface_pressure'] = (('time', 'y', 'x'), indata.PSFC.data)
         ds.surface_pressure.attrs['units'] = indata.PSFC.units
+    ds.surface_pressure.attrs['description'] = 'Pressure at surface (not reduced)'
 
     # Get full 3-D variables
     # Height - from geopotential
-    hgt = (indata.PH.data + indata.PHB.data) / 9.81
+    hgt = ((indata.PH.data + indata.PHB.data) / 9.81) * units('meter')
     ds['height_mean_sea_level'] = (('time', 'z', 'y', 'x'), destagger(hgt, 1))
     ds.height_mean_sea_level.attrs['Description'] = 'Height above mean sea level'
     ds.height_mean_sea_level.attrs['units'] = 'meter'
 
     # Terrain height
-    ds['terrain_height'] = (('time', 'y', 'x'), indata.HGT.data)
-    ds.terrain_height.attrs['Description'] = 'Height of model terrain'
     if indata.HGT.units == 'm':
+        ds['terrain_height'] = (('time', 'y', 'x'), indata.HGT.data * units.meter)
         ds.terrain_height.attrs['units'] = 'meter'
     else:
+        ds['terrain_height'] = (('time', 'y', 'x'), indata.HGT.data)
         warnings.warn('Unknown height unit {} encountered'.format(indata.HGT.units))
         ds.terrain_height.attrs['units'] = indata.HGT.units
+    ds.terrain_height.attrs['Description'] = 'Height of model terrain'
 
     # Pressure
     # TODO: find a way to not assume units of input data
     p = indata.P + indata.PB
-    ds['pressure'] = (('time', 'z', 'y', 'x'), p.data)
-    ds.pressure.attrs['description'] = 'Full model pressure'
     if indata.P.units == 'Pa':
+        ds['pressure'] = (('time', 'z', 'y', 'x'), p.data * units.pascal)
         ds.pressure.attrs['units'] = 'pascal'
     else:
         warnings.warn('Unknown pressure unit {} encountered'.format(indata.P.units))
+        ds['pressure'] = (('time', 'z', 'y', 'x'), p.data)
         ds.pressure.attrs['units'] = indata.P.units
+    ds.pressure.attrs['description'] = 'Full model pressure'
 
     theta = indata.T + 300.
-    ds['potential_temperature'] = (('time', 'z', 'y', 'x'), theta.data)
     if indata.T.units == 'K':
+        ds['potential_temperature'] = (('time', 'z', 'y', 'x'), theta.data * units.kelvin)
         ds.potential_temperature.attrs['units'] = 'kelvin'
     else:
         warnings.warn('Unknown pressure unit {} encountered'.format(indata.T.units))
+        ds['potential_temperature'] = (('time', 'z', 'y', 'x'), theta.data)
         ds.potential_temperature.attrs['units'] = indata.T.units
 
-    temp = temperature_from_potential_temperature(ds.pressure, ds.potential_temperature, )
+    temp = temperature_from_potential_temperature(ds.pressure, ds.potential_temperature)
     ds['temperature'] = temp
-    if indata.T.units == 'K':
-        ds.temperature.attrs['units'] = 'kelvin'
-    else:
-        warnings.warn('Unknown pressure unit {} encountered'.format(indata.T.units))
-        ds.temperature.attrs['units'] = indata.T.units
+    ds.temperature.attrs['units'] = 'kelvin'
 
     # Vapor mixing ratio
-    ds['vapor_mixing_ratio'] = (('time', 'z', 'y', 'x'), indata.QVAPOR.data)
-    ds.vapor_mixing_ratio.attrs['description'] = 'Water vapor mixing ratio'
     if indata.QVAPOR.units == 'kg kg-1':
+        ds['vapor_mixing_ratio'] = (('time', 'z', 'y', 'x'),
+                                    indata.QVAPOR.data * units.dimensionless)
         ds.vapor_mixing_ratio.attrs['units'] = 'dimensionless'
     else:
         warnings.warn('Unknown unit {} encountered'.format(indata.QVAPOR.units))
+        ds['vapor_mixing_ratio'] = (('time', 'z', 'y', 'x'), indata.QVAPOR.data)
         ds.vapor_mixing_ratio.attrs['units'] = indata.QVAPOR.units
+    ds.vapor_mixing_ratio.attrs['description'] = 'Water vapor mixing ratio'
 
     # Cloud mixing ratio
-    ds['cloud_mixing_ratio'] = (('time', 'z', 'y', 'x'), indata.QCLOUD.data)
-    ds.cloud_mixing_ratio.attrs['description'] = 'Cloud water mixing ratio'
     if indata.QCLOUD.units == 'kg kg-1':
+        ds['cloud_mixing_ratio'] = (('time', 'z', 'y', 'x'),
+                                    indata.QCLOUD.data * units.dimensionless)
         ds.cloud_mixing_ratio.attrs['units'] = 'dimensionless'
     else:
         warnings.warn('Unknown units {} encountered'.format(indata.QCLOUD.units))
+        ds['cloud_mixing_ratio'] = (('time', 'z', 'y', 'x'), indata.QCLOUD.data)
         ds.cloud_mixing_ratio.attrs['units'] = indata.QCLOUD.units
+    ds.cloud_mixing_ratio.attrs['description'] = 'Cloud water mixing ratio'
 
     # Rain mixing ratio
-    ds['rain_mixing_ratio'] = (('time', 'z', 'y', 'x'), indata.QRAIN.data)
-    ds.rain_mixing_ratio.attrs['description'] = 'Rain water mixing ratio'
     if indata.QRAIN.units == 'kg kg-1':
+        ds['rain_mixing_ratio'] = (('time', 'z', 'y', 'x'),
+                                    indata.QRAIN.data * units.dimensionless)
         ds.rain_mixing_ratio.attrs['units'] = 'dimensionless'
     else:
         warnings.warn('Unknown unit {} encountered'.format(indata.QRAIN.units))
+        ds['rain_mixing_ratio'] = (('time', 'z', 'y', 'x'), indata.QRAIN.data)
         ds.rain_mixing_ratio.attrs['units'] = indata.QRAIN.units
+    ds.rain_mixing_ratio.attrs['description'] = 'Rain water mixing ratio'
 
     # Ice mixing ratio
     try:
-        ds['ice_mixing_ratio'] = (('time', 'z', 'y', 'x'), indata.QICE.data)
-        ds.ice_mixing_ratio.attrs['description'] = 'Ice mixing ratio'
         if indata.QICE.units == 'kg kg-1':
+            ds['ice_mixing_ratio'] = (('time', 'z', 'y', 'x'),
+                                      indata.QICE.data * units.dimensionless)
             ds.ice_mixing_ratio.attrs['units'] = 'dimensionless'
         else:
             warnings.warn('Unknown unit {} encountered'.format(indata.QICE.units))
+            ds['ice_mixing_ratio'] = (('time', 'z', 'y', 'x'), indata.QICE.data)
             ds.ice_mixing_ratio.attrs['units'] = indata.QICE.units
+        ds.ice_mixing_ratio.attrs['description'] = 'Ice mixing ratio'
     except AttributeError:
         pass
 
     # Snow mixing ratio
     try:
-        ds['snow_mixing_ratio'] = (('time', 'z', 'y', 'x'), indata.QSNOW.data)
-        ds.snow_mixing_ratio.attrs['description'] = 'Snow mixing ratio'
         qsnow = indata.QSNOW.data
         if indata.QSNOW.units == 'kg kg-1':
+            ds['snow_mixing_ratio'] = (('time', 'z', 'y', 'x'), qsnow * units.dimensionless)
             ds.snow_mixing_ratio.attrs['units'] = 'dimensionless'
         else:
             warnings.warn('Unknown unit {} encountered'.format(indata.QSNOW.units))
+            ds['snow_mixing_ratio'] = (('time', 'z', 'y', 'x'), qsnow)
             ds.snow_mixing_ration.attrs['units'] = indata.QSNOW.units
+        ds.snow_mixing_ratio.attrs['description'] = 'Snow mixing ratio'
     except AttributeError:
         qsnow = None
 
     # Graupel mixing ratio
     try:
-        ds['graupel_mixing_ratio'] = (('time', 'z', 'y', 'x'), indata.QGRAUP.data)
-        ds.graupel_mixing_ratio.attrs['description'] = 'Graupel mixing ratio'
         qgraupel = indata.QGRAUP.data
         if indata.QGRAUP.units == 'kg kg-1':
+            ds['graupel_mixing_ratio'] = (('time', 'z', 'y', 'x'),
+                                          qgraupel * units.dimensionless)
             ds.graupel_mixing_ratio.attrs['units'] = 'dimensionless'
         else:
             warnings.warn('Unknown unit {} encountered'.format(indata.QGRAUP.units))
+            ds['graupel_mixing_ratio'] = (('time', 'z', 'y', 'x'), qgraupel)
             ds.graupel_mixing_ratio.attrs['units'] = indata.QGRAUP.units
+        ds.graupel_mixing_ratio.attrs['description'] = 'Graupel mixing ratio'
     except AttributeError:
         qgraupel = None
 
     # Ice number concentration
     try:
-        ds['ice_number_concentration'] = (('time', 'z', 'y', 'x'), indata.QNICE.data)
-        ds.ice_number_concentration.attrs['description'] = 'Ice number concentration'
         if indata.QNICE.units == '  kg-1':
-            ds.ice_number_concentration.attrs['units'] = 'kilogram**-1'
+            ds['ice_number_concentration'] = (('time', 'z', 'y', 'x'),
+                                              indata.QNICE.data * units('kg^-1'))
+            ds.ice_number_concentration.attrs['units'] = 'kg^-1'
         else:
             warnings.warn('Unknown unit {} encountered'.format(indata.QNICE.units))
+            ds['ice_number_concentration'] = (('time', 'z', 'y', 'x'), indata.QNICE.data)
             ds.ice_number_concentration.attrs['units'] = indata.QNICE.units
+        ds.ice_number_concentration.attrs['description'] = 'Ice number concentration'
     except AttributeError:
         pass
 
     # Rain number concentration
     try:
-        ds['rain_number_concentration'] = (('time', 'z', 'y', 'x'), indata.QNRAIN.data)
-        ds.rain_number_concentration.attrs['description'] = 'Rain number concentration'
+
+
         if indata.QNRAIN.units == '  kg(-1)':
-            ds.rain_number_concentration.attrs['units'] = 'kilogram**-1'
+            ds['rain_number_concentration'] = (('time', 'z', 'y', 'x'),
+                                               indata.QNRAIN.data * units('kg^-1'))
+            ds.rain_number_concentration.attrs['units'] = 'kg^-1'
         else:
             warnings.warn('Unknown unit {} encountered'.format(indata.QNRAIN.units))
+            ds['rain_number_concentration'] = (('time', 'z', 'y', 'x'), indata.QNRAIN.data)
             ds.rain_number_concentration.attrs['units'] = indata.QNRAIN.units
+        ds.rain_number_concentration.attrs['description'] = 'Rain number concentration'
     except AttributeError:
         pass
 
@@ -1515,52 +1542,57 @@ def open_wrf_dataset(inname, nest='static', chunks=None):
     u = destagger(indata.U.data, -1)
     v = destagger(indata.V.data, -2)
 
-    ds['u_wind'] = (('time', 'z', 'y', 'x'), u)
     ds.u_wind.attrs['description'] = 'U-component of wind (model-relative)'
     if indata.U.units == 'm s-1':
+        ds['u_wind'] = (('time', 'z', 'y', 'x'), u * units('m/s'))
         ds.u_wind.attrs['units'] = 'meter/second'
     else:
         warnings.warn('Unknown velocity unit {} encountered'.format(indata.U.units))
+        ds['u_wind'] = (('time', 'z', 'y', 'x'), u)
         ds.u_wind.attrs['units'] = indata.U.units
 
     # v-component of wind
-    ds['v_wind'] = (('time', 'z', 'y', 'x'), v)
-    ds.v_wind.attrs['description'] = 'V-component of wind (model-relative)'
     if indata.V.units == 'm s-1':
+        ds['v_wind'] = (('time', 'z', 'y', 'x'), v * units('m/s'))
         ds.v_wind.attrs['units'] = 'meter/second'
     else:
         warnings.warn('Unknown velocity unit {} encountered'.format(indata.V.units))
+        ds['v_wind'] = (('time', 'z', 'y', 'x'), v)
         ds.v_wind.attrs['units'] = indata.V.units
+    ds.v_wind.attrs['description'] = 'V-component of wind (model-relative)'
 
     # earth-relative
     u_rot, v_rot = earth_relative_winds(u, v, sinalpha[:, np.newaxis, ],
                                         cosalpha[:, np.newaxis, ])
-
-    ds['u_wind_earth_relative'] = (('time', 'z', 'y', 'x'), u_rot)
-    ds.u_wind_earth_relative.attrs['description'] = 'U-component of wind (earth-relative)'
     if indata.U.units == 'm s-1':
+        ds['u_wind_earth_relative'] = (('time', 'z', 'y', 'x'), u_rot * units('m/s'))
         ds.u_wind_earth_relative.attrs['units'] = 'meter/second'
     else:
         warnings.warn('Unknown velocity unit {} encountered'.format(indata.U.units))
+        ds['u_wind_earth_relative'] = (('time', 'z', 'y', 'x'), u_rot)
         ds.u_wind_earth_relative.attrs['units'] = indata.U.units
+    ds.u_wind_earth_relative.attrs['description'] = 'U-component of wind (earth-relative)'
 
     # v-component of wind
-    ds['v_wind_earth_relative'] = (('time', 'z', 'y', 'x'), v_rot)
-    ds.v_wind_earth_relative.attrs['description'] = 'V-component of wind (earth-relative)'
     if indata.V.units == 'm s-1':
+        ds['v_wind_earth_relative'] = (('time', 'z', 'y', 'x'), v_rot * units('m/s'))
         ds.v_wind_earth_relative.attrs['units'] = 'meter/second'
     else:
         warnings.warn('Unknown velocity unit {} encountered'.format(indata.V.units))
+        ds['v_wind_earth_relative'] = (('time', 'z', 'y', 'x'), v_rot)
         ds.v_wind_earth_relative.attrs['units'] = indata.V.units
+    ds.v_wind_earth_relative.attrs['description'] = 'V-component of wind (earth-relative)'
 
     # w-component of wind
-    ds['w_wind'] = (('time', 'z', 'y', 'x'), destagger(indata.W.data, -3))
-    ds.w_wind.attrs['description'] = 'W-component of wind'
+    w = destagger(indata.W.data, -3)
     if indata.W.units == 'm s-1':
+        ds['w_wind'] = (('time', 'z', 'y', 'x'),  w * units('m/s'))
         ds.w_wind.attrs['units'] = 'meter/second'
     else:
         warnings.warn('Unknown velocity unit {} encountered'.format(indata.W.units))
+        ds['w_wind'] = (('time', 'z', 'y', 'x'),  w)
         ds.w_wind.attrs['units'] = indata.W.units
+    ds.w_wind.attrs['description'] = 'W-component of wind'
 
     # COSALPHA and SINALPHA for model grid to earth-relative rotation
     ds['cosalpha'] = (('time', 'y', 'x'), sinalpha)
@@ -1571,19 +1603,21 @@ def open_wrf_dataset(inname, nest='static', chunks=None):
 
     # TKE from PBL scheme
     try:
-        ds['tke'] = (('time', 'z', 'y', 'x'), destagger(indata.TKE_PBL.data, -3))
-        ds.tke.attrs['description'] = 'Turbulence Kinetic Energy (TKE) from PBL scheme'
+        tke = destagger(indata.TKE_PBL.data, -3)
         if indata.TKE_PBL.units == 'm2 s-2':
+            ds['tke'] = (('time', 'z', 'y', 'x'), tke * units('m^2/s^2'))
             ds.w_wind.attrs['units'] = 'meter**2/second**2'
         else:
             warnings.warn('Unknown unit {} encountered'.format(indata.TKE_PBL.units))
+            ds['tke'] = (('time', 'z', 'y', 'x'), tke)
             ds.tke.attrs['units'] = indata.TKE_PBL.units
+        ds.tke.attrs['description'] = 'Turbulence Kinetic Energy (TKE) from PBL scheme'
     except AttributeError:
         pass
 
-    refl = simulated_reflectivity(ds['pressure'].data, ds.temperature.data,
-                                  ds['vapor_mixing_ratio'].data,
-                                  ds['rain_mixing_ratio'].data,
+    refl = simulated_reflectivity(ds['pressure'], ds.temperature,
+                                  ds['vapor_mixing_ratio'],
+                                  ds['rain_mixing_ratio'],
                                   snow_mixing_ratio=qsnow,
                                   graupel_mixing_ratio=qgraupel)
     ds['simulated_reflectivity'] = (('time', 'z', 'y', 'x'), refl)
@@ -1643,13 +1677,14 @@ def earth_relative_winds(u, v, sinalpha, cosalpha):
     return u_rot, v_rot
 
 
-def lcc_projection(indata, r=6370000):
+def lcc_projection(indata, r=6370000*units.meter):
     """
     Define projection coordinates for WRF Lambert Conformal Conic grid
     :param indata: Xarray.Dataset containing WRF output as netCDF
     :param r: radius of earth (spherical)
     :return: x, y: x and y coordinate arrays
     """
+    r = r.to('meter').m
     wrf_proj = pyproj.Proj(proj='lcc',  # projection type: Lambert Conformal Conic
                            # Cone intersects with the sphere
                            lat_1=indata.TRUELAT1, lat_2=indata.TRUELAT2,
@@ -1667,7 +1702,7 @@ def lcc_projection(indata, r=6370000):
 
     x = da.arange(nx) * dx + x0
     y = da.arange(ny) * dy + y0
-    return x, y
+    return x * units.meter, y * units.meter
 
 
 def simulated_reflectivity(pressure, temperature, vapor_mixing_ratio, liquid_mixing_ratio,
