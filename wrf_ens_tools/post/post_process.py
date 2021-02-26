@@ -1542,7 +1542,6 @@ def open_wrf_dataset(inname, nest='static', chunks=None):
     u = destagger(indata.U.data, -1)
     v = destagger(indata.V.data, -2)
 
-    ds.u_wind.attrs['description'] = 'U-component of wind (model-relative)'
     if indata.U.units == 'm s-1':
         ds['u_wind'] = (('time', 'z', 'y', 'x'), u * units('m/s'))
         ds.u_wind.attrs['units'] = 'meter/second'
@@ -1550,6 +1549,7 @@ def open_wrf_dataset(inname, nest='static', chunks=None):
         warnings.warn('Unknown velocity unit {} encountered'.format(indata.U.units))
         ds['u_wind'] = (('time', 'z', 'y', 'x'), u)
         ds.u_wind.attrs['units'] = indata.U.units
+    ds.u_wind.attrs['description'] = 'U-component of wind (model-relative)'
 
     # v-component of wind
     if indata.V.units == 'm s-1':
